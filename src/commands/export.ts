@@ -1,7 +1,7 @@
 import { db } from '../db.ts';
 import { datasetTable } from '../db/schemas/index.ts';
 
-const dataset_output_file = `dataset/claude-opus-4.6-high-reasoning-1700x.jsonl`;
+const dataset_output_file = `dataset/claude-opus-4.6-high-reasoning-2000x.jsonl`;
 
 const results = db
   .select({ messages: datasetTable.messages })

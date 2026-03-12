@@ -9,8 +9,25 @@ import {
   storeTable
 } from './db/schemas/index.ts';
 
-const dataset_input_file = `dataset/claude-haiku-4.5-high-reasoning-1700x.jsonl`;
-const entries_limit = 10; // -1 or undefined for UNLIMITED
+function readFlag(name: string) {
+  const entry = Bun.argv.find(
+    (arg) => arg === name || arg.startsWith(`${name}=`)
+  );
+  if (!entry) {
+    return undefined;
+  }
+
+  if (entry === name) {
+    const flagIndex = Bun.argv.indexOf(entry);
+    return Bun.argv[flagIndex + 1];
+  }
+
+  return entry.slice(name.length + 1);
+}
+
+const dataset_input_file =
+  readFlag('--input') ?? `dataset/programming-language-source-2000x.jsonl`;
+const entries_limit = Number.parseInt(readFlag('--limit') ?? '10', 10); // -1 for unlimited
 
 const anthropic_headers = {
   'anthropic-version': '2023-06-01',
@@ -228,7 +245,8 @@ for (const request of messages_requests) {
               model: distill_model,
               max_tokens: distill_max_output_tokens,
               service_tier: 'standard_only',
-              output_config: { effort: 'high' }
+              output_config: { effort: 'max' },
+              thinking: { type: 'adaptive' }
             }
           }
         ]
