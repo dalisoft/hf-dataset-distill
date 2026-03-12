@@ -164,13 +164,13 @@ async function retrieveBatches(lastId?: string) {
             messages
           })
           .where(eq(datasetTable.batch_id, request.id));
-        /* await fetch(
+        await fetch(
           `https://api.anthropic.com/v1/messages/batches/${request.id}`,
           {
             method: 'DELETE',
             headers: anthropic_headers
           }
-        ); */
+        );
         return;
       }
 
