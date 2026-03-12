@@ -1,7 +1,7 @@
 {
-  "name": "ai-opus-4.6-dataset-high-1700x",
+  "name": "hf-dataset-distill",
   "version": "1.0.0",
-  "description": "This is a reasoning dataset created using [Claude Haiku 4.5](https://openrouter.ai/anthropic/claude-haiku-4.5) with reasoning effort set to high.",
+  "description": "An project to help with distillation of models to get dataset with Batch API (50% discount)",
   "main": "src/app.ts",
   "scripts": {
     "start": "bun run --bun .",
@@ -12,11 +12,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://huggingface.co/datasets/dalisoft/claude-opus-4.6-high-reasoning-1700x"
+    "url": "https://github.com/dalisoft/hf-dataset-distill"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Davlatjon Shavkatov <opensource@dalisoft.uz>",
+  "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {
     "@libsql/client": "^0.17.0",
