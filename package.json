@@ -1,0 +1,33 @@
+{
+  "name": "ai-opus-4.6-dataset-high-1700x",
+  "version": "1.0.0",
+  "description": "This is a reasoning dataset created using [Claude Haiku 4.5](https://openrouter.ai/anthropic/claude-haiku-4.5) with reasoning effort set to high.",
+  "main": "src/app.ts",
+  "scripts": {
+    "start": "bun run --bun .",
+    "dev": "bun run --bun --watch .",
+    "migrate": "drizzle-kit migrate",
+    "up": "drizzle-kit generate && bun run migrate",
+    "export": "bun run --bun ./src/commands/export.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://huggingface.co/datasets/dalisoft/claude-opus-4.6-high-reasoning-1700x"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@libsql/client": "^0.17.0",
+    "@types/bun": "^1.3.10",
+    "drizzle-kit": "^0.31.9",
+    "prettier": "^3.8.1",
+    "prettier-config-airlight": "^6.0.5",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.1",
+    "tss-env": "^0.0.3"
+  }
+}
