@@ -9,25 +9,8 @@ import {
   storeTable
 } from './db/schemas/index.ts';
 
-function readFlag(name: string) {
-  const entry = Bun.argv.find(
-    (arg) => arg === name || arg.startsWith(`${name}=`)
-  );
-  if (!entry) {
-    return undefined;
-  }
-
-  if (entry === name) {
-    const flagIndex = Bun.argv.indexOf(entry);
-    return Bun.argv[flagIndex + 1];
-  }
-
-  return entry.slice(name.length + 1);
-}
-
-const dataset_input_file =
-  readFlag('--input') ?? `dataset/programming-language-source-2000x.jsonl`;
-const entries_limit = Number.parseInt(readFlag('--limit') ?? '10', 10); // -1 for unlimited
+const dataset_input_file = `dataset/programming-language-source-2000x.jsonl`;
+const entries_limit = -1; // -1 for unlimited
 
 const anthropic_headers = {
   'anthropic-version': '2023-06-01',
@@ -89,15 +72,17 @@ async function retrieveBatches(lastId?: string) {
       headers: anthropic_headers
     }
   );
-  const {
-    data: batches_response,
-    has_more,
-    last_id
-  } = (await batches.json()) as {
+  const response = (await batches.json()) as {
     data: IBatchResponse[];
     has_more: boolean;
     last_id: string;
   };
+
+  if (!response.data) {
+    console.log('Response failed', response);
+    return;
+  }
+  const { data: batches_response, has_more, last_id } = response;
 
   await Promise.all(
     batches_response.map(async (request) => {
@@ -118,14 +103,74 @@ async function retrieveBatches(lastId?: string) {
           )
           .get()
       ) {
-        console.log('Batch entry end', request.id);
-        await fetch(
+        // console.log('Batch entry end', request.id);
+
+        const get_batch_result_fetch = await fetch(
+          `https://api.anthropic.com/v1/messages/batches/${request.id}/results`,
+          {
+            headers: anthropic_headers
+          }
+        );
+        if (!get_batch_result_fetch.ok) {
+          console.log('Failed response?', await get_batch_result_fetch.json());
+          return;
+        }
+
+        const get_batch_result_response =
+          (await get_batch_result_fetch.json()) as {
+            custom_id: string;
+            result: {
+              message: {
+                role: 'assistant';
+                content: Array<
+                  | { type: 'text'; text: string }
+                  | { type: 'thinking'; thinking: string; signature: string }
+                >;
+              };
+            };
+          };
+
+        /* console.log(
+          `Request ${get_batch_result_response.custom_id}: status is ${request.processing_status}`
+        ); */
+
+        const user_messages =
+          messages_requests.find(
+            (req) => req.custom_id === get_batch_result_response.custom_id
+          )?.params?.messages ?? [];
+
+        const messages = [
+          ...user_messages,
+          {
+            role: 'assistant' as 'assistant',
+            content: get_batch_result_response.result.message.content
+              .map(
+                (
+                  content:
+                    | { type: 'text'; text: string }
+                    | { type: 'thinking'; thinking: string; signature: string }
+                ) =>
+                  content.type === 'text'
+                    ? content.text
+                    : `<${content.type}>${content.thinking}</${content.type}>`
+              )
+              .join('\n')
+          }
+        ].filter(Boolean);
+
+        await db
+          .update(datasetTable)
+          .set({
+            messages
+          })
+          .where(eq(datasetTable.batch_id, request.id));
+        /* await fetch(
           `https://api.anthropic.com/v1/messages/batches/${request.id}`,
           {
             method: 'DELETE',
             headers: anthropic_headers
           }
-        );
+        ); */
         return;
       }
 
@@ -168,10 +213,14 @@ async function retrieveBatches(lastId?: string) {
             result: {
               message: {
                 role: 'assistant';
-                content: Array<{ text: string }>;
+                content: Array<
+                  | { type: 'text'; text: string }
+                  | { type: 'thinking'; thinking: string; signature: string }
+                >;
               };
             };
           };
+
         /* console.log(
           `Request ${get_batch_result_response.custom_id}: status is ${request.processing_status}`
         ); */
@@ -186,7 +235,16 @@ async function retrieveBatches(lastId?: string) {
           {
             role: 'assistant' as 'assistant',
             content: get_batch_result_response.result.message.content
-              .map((content: { text: string }) => content.text)
+              .map(
+                (
+                  content:
+                    | { type: 'text'; text: string }
+                    | { type: 'thinking'; thinking: string; signature: string }
+                ) =>
+                  content.type === 'text'
+                    ? content.text
+                    : `<${content.type}>${content.thinking}</${content.type}>`
+              )
               .join('\n')
           }
         ].filter(Boolean);
@@ -200,13 +258,13 @@ async function retrieveBatches(lastId?: string) {
           .onConflictDoNothing();
 
         // Delete batch, CLEANUP
-        await fetch(
+        /* await fetch(
           `https://api.anthropic.com/v1/messages/batches/${request.id}`,
           {
             method: 'DELETE',
             headers: anthropic_headers
           }
-        );
+        ); */
       }
     })
   );
