@@ -2,6 +2,9 @@
 
 An project to help with distillation of models to get dataset with Batch API (50% discount)
 
+- [GitHub](https://github.com/dalisoft/hf-dataset-distill)
+- [HuggingFace](https://huggingface.co/datasets/dalisoft/claude-opus-4.6-high-reasoning-1700x)
+
 ## Features
 
 - Easy to use commands
