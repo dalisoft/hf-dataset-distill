@@ -3,7 +3,7 @@
 An project to help with distillation of models to get dataset with Batch API (50% discount)
 
 - [GitHub](https://github.com/dalisoft/hf-dataset-distill)
-- [HuggingFace](https://huggingface.co/datasets/dalisoft/claude-opus-4.6-high-reasoning-1700x)
+- [HuggingFace](https://huggingface.co/datasets/dalisoft/claude-opus-4.6-high-reasoning-700x)
 
 ## Features
 
@@ -46,7 +46,7 @@ bun run start
 bun run export
 ```
 
-An file should be ready at [`dataset/`](./dataset/)
+An file should be ready at [`dataset/`](./dataset/claude-opus-4.6-high-reasoning-700x.jsonl)
 
 ## License
 
