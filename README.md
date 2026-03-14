@@ -54,6 +54,27 @@ bun run stat
 
 An file should be ready at [`dataset/`](./dataset/claude-opus-4.6-high-reasoning-700x.jsonl)
 
+## Source dataset
+
+PROMPT:
+
+```txt
+Generate a dataset for different/mixed purposes with focus on programming language.
+
+Most of dataset should be:
+- Rust
+- Golang
+- TypeScript/JavaScript/Node.js
+- Also other programming languages
+
+should be included.
+
+Most output should be simpler, not verbose or expanded.
+Only last 30% rows should be verbose with expanded details.
+
+Output dataset entries: ~2000 rows
+```
+
 ## License
 
 Apache-2.0
