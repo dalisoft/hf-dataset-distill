@@ -70,7 +70,7 @@ Most of dataset should be:
 should be included.
 
 Most output should be simpler, not verbose or expanded.
-Only last 30% rows should be verbose with expanded details.
+Only last 15% rows should be verbose with expanded details.
 
 Output dataset entries: ~2000 rows
 ```
