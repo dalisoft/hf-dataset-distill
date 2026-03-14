@@ -46,13 +46,13 @@ bun run start
 bun run export
 ```
 
+An file should be ready at [`dataset/`](./dataset/claude-opus-4.6-high-reasoning-700x.jsonl)
+
 ### Dataset stat
 
 ```bash
 bun run stat
 ```
-
-An file should be ready at [`dataset/`](./dataset/claude-opus-4.6-high-reasoning-700x.jsonl)
 
 ## Source dataset
 
