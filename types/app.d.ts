@@ -2,6 +2,10 @@ interface IMessageEntry {
   role: 'user' | 'assistant';
   content: string;
 }
+interface IMessages {
+  messages: IMessageEntry[];
+}
+
 interface IBatchResponse {
   id: string;
   archived_at: string;

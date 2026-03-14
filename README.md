@@ -46,6 +46,12 @@ bun run start
 bun run export
 ```
 
+### Dataset stat
+
+```bash
+bun run stat
+```
+
 An file should be ready at [`dataset/`](./dataset/claude-opus-4.6-high-reasoning-700x.jsonl)
 
 ## License
