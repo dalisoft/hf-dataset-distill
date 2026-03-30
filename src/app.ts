@@ -8,21 +8,21 @@ import {
   outputBatchTable,
   storeTable
 } from './db/schemas/index.ts';
+import Anthropic from '@anthropic-ai/sdk';
 
 const dataset_input_file = `dataset/programming-language-source-2000x.jsonl`;
 const entries_limit = -1; // -1 for unlimited
 
-const anthropic_headers = {
-  'anthropic-version': '2023-06-01',
-  'content-type': 'application/json',
-  'x-api-key': process.env.ANTHROPIC_API_KEY
-};
+const aisdk = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY
+});
+
 const distill_model = 'claude-opus-4-6';
 const distill_max_output_tokens = 32000;
 
 const jsonl_data_source = JSONL.parse(
   await file(dataset_input_file).text()
-) as Array<{ messages: IMessageEntry[] }>;
+) as Array<{ messages: Anthropic.Messages.MessageParam[] }>;
 const jsonl_data =
   typeof entries_limit === 'number' &&
   !Number.isNaN(entries_limit) &&
@@ -37,7 +37,7 @@ const input_messages = jsonl_data
 
 // Prepare dataset for batch
 const messages_requests = input_messages.map((message) => ({
-  custom_id: SHA256.hash(message.content, 'hex').toString(),
+  custom_id: SHA256.hash(message.content.toString(), 'hex').toString(),
   params: {
     messages: [message]
   }
@@ -64,19 +64,82 @@ if (
 }
 
 // Prepare batch and output
+async function handleBatch(
+  result: Anthropic.Messages.Batches.MessageBatchIndividualResponse
+) {
+  switch (result.result.type) {
+    case 'succeeded':
+      const user_messages =
+        messages_requests.find((req) => req.custom_id === result.custom_id)
+          ?.params?.messages ?? [];
 
-async function retrieveBatches(lastId?: string) {
-  const batches = await fetch(
-    `https://api.anthropic.com/v1/messages/batches?limit=500${lastId ? '&after_id=' + lastId : ''}`,
-    {
-      headers: anthropic_headers
-    }
-  );
-  const response = (await batches.json()) as {
-    data: IBatchResponse[];
-    has_more: boolean;
-    last_id: string;
-  };
+      const messages: Anthropic.Messages.MessageParam[] = [
+        ...user_messages,
+        {
+          role: 'assistant' as 'assistant',
+          content: result.result.message.content
+            .map((content) =>
+              content.type === 'text'
+                ? content.text
+                : content.type === 'thinking'
+                  ? `<${content.type}>${content.thinking}</${content.type}>`
+                  : ''
+            )
+            .filter(Boolean)
+            .join('\n') as Anthropic.Messages.MessageParam['content']
+        }
+      ].filter(Boolean);
+
+      await db
+        .insert(datasetTable)
+        .values({
+          batch_id: result.result.message.id,
+          messages
+        })
+        .onConflictDoNothing();
+
+      // Delete batch, CLEANUP
+      /* await fetch(
+          `https://api.anthropic.com/v1/messages/batches/${request.id}`,
+          {
+            method: 'DELETE',
+            headers: anthropic_headers
+          }
+        ); */
+      break;
+    case 'canceled':
+      console.log(`Request ${result.custom_id}: batch request canceled`);
+
+      await db
+        .delete(outputBatchTable)
+        .where(eq(outputBatchTable.request_id, result.custom_id));
+
+      break;
+    case 'errored':
+      if (result.result.error.error.type === 'invalid_request_error') {
+        // Request body must be fixed before re-sending request
+        console.log(`Validation error: ${result.custom_id}`);
+      } else {
+        // Request can be retried directly
+        console.log(`Server error: ${result.custom_id}`);
+      }
+      break;
+    case 'expired':
+      console.log(`Request ${result.custom_id}: batch request expired`);
+
+      await db
+        .delete(outputBatchTable)
+        .where(eq(outputBatchTable.request_id, result.custom_id));
+      break;
+  }
+}
+
+async function retrieveBatches(lastId: string | null) {
+  const batches = await aisdk.messages.batches.list({
+    limit: 500,
+    ...(lastId !== null ? { after_id: lastId } : {})
+  });
+  const response = batches;
 
   if (!response.data) {
     console.log('Response failed', response);
@@ -105,72 +168,12 @@ async function retrieveBatches(lastId?: string) {
       ) {
         // console.log('Batch entry end', request.id);
 
-        const get_batch_result_fetch = await fetch(
-          `https://api.anthropic.com/v1/messages/batches/${request.id}/results`,
-          {
-            headers: anthropic_headers
-          }
-        );
-        if (!get_batch_result_fetch.ok) {
-          console.log('Failed response?', await get_batch_result_fetch.json());
-          return;
+        for await (const batch_item of await aisdk.messages.batches.results(
+          request.id
+        )) {
+          await handleBatch(batch_item);
         }
 
-        const get_batch_result_response =
-          (await get_batch_result_fetch.json()) as {
-            custom_id: string;
-            result: {
-              message: {
-                role: 'assistant';
-                content: Array<
-                  | { type: 'text'; text: string }
-                  | { type: 'thinking'; thinking: string; signature: string }
-                >;
-              };
-            };
-          };
-
-        /* console.log(
-          `Request ${get_batch_result_response.custom_id}: status is ${request.processing_status}`
-        ); */
-
-        const user_messages =
-          messages_requests.find(
-            (req) => req.custom_id === get_batch_result_response.custom_id
-          )?.params?.messages ?? [];
-
-        const messages = [
-          ...user_messages,
-          {
-            role: 'assistant' as 'assistant',
-            content: get_batch_result_response.result.message.content
-              .map(
-                (
-                  content:
-                    | { type: 'text'; text: string }
-                    | { type: 'thinking'; thinking: string; signature: string }
-                ) =>
-                  content.type === 'text'
-                    ? content.text
-                    : `<${content.type}>${content.thinking}</${content.type}>`
-              )
-              .join('\n')
-          }
-        ].filter(Boolean);
-
-        await db
-          .update(datasetTable)
-          .set({
-            messages
-          })
-          .where(eq(datasetTable.batch_id, request.id));
-        await fetch(
-          `https://api.anthropic.com/v1/messages/batches/${request.id}`,
-          {
-            method: 'DELETE',
-            headers: anthropic_headers
-          }
-        );
         return;
       }
 
@@ -196,75 +199,11 @@ async function retrieveBatches(lastId?: string) {
         request.processing_status === 'ended' &&
         request.request_counts.succeeded
       ) {
-        const get_batch_result_fetch = await fetch(
-          `https://api.anthropic.com/v1/messages/batches/${request.id}/results`,
-          {
-            headers: anthropic_headers
-          }
-        );
-        if (!get_batch_result_fetch.ok) {
-          console.log('Failed response?', await get_batch_result_fetch.json());
-          return;
+        for await (const result of await aisdk.messages.batches.results(
+          request.id
+        )) {
+          await handleBatch(result);
         }
-
-        const get_batch_result_response =
-          (await get_batch_result_fetch.json()) as {
-            custom_id: string;
-            result: {
-              message: {
-                role: 'assistant';
-                content: Array<
-                  | { type: 'text'; text: string }
-                  | { type: 'thinking'; thinking: string; signature: string }
-                >;
-              };
-            };
-          };
-
-        /* console.log(
-          `Request ${get_batch_result_response.custom_id}: status is ${request.processing_status}`
-        ); */
-
-        const user_messages =
-          messages_requests.find(
-            (req) => req.custom_id === get_batch_result_response.custom_id
-          )?.params?.messages ?? [];
-
-        const messages = [
-          ...user_messages,
-          {
-            role: 'assistant' as 'assistant',
-            content: get_batch_result_response.result.message.content
-              .map(
-                (
-                  content:
-                    | { type: 'text'; text: string }
-                    | { type: 'thinking'; thinking: string; signature: string }
-                ) =>
-                  content.type === 'text'
-                    ? content.text
-                    : `<${content.type}>${content.thinking}</${content.type}>`
-              )
-              .join('\n')
-          }
-        ].filter(Boolean);
-
-        await db
-          .insert(datasetTable)
-          .values({
-            batch_id: request.id,
-            messages
-          })
-          .onConflictDoNothing();
-
-        // Delete batch, CLEANUP
-        /* await fetch(
-          `https://api.anthropic.com/v1/messages/batches/${request.id}`,
-          {
-            method: 'DELETE',
-            headers: anthropic_headers
-          }
-        ); */
       }
     })
   );
@@ -275,7 +214,7 @@ async function retrieveBatches(lastId?: string) {
     await retrieveBatches(last_id);
   }
 }
-await retrieveBatches();
+await retrieveBatches(null);
 
 // Initialize batch
 for (const request of messages_requests) {
@@ -289,45 +228,29 @@ for (const request of messages_requests) {
     continue;
   }
 
-  const send_batch_fetch = await fetch(
-    'https://api.anthropic.com/v1/messages/batches',
-    {
-      method: 'POST',
-      headers: anthropic_headers,
-      body: JSON.stringify({
-        requests: [
-          {
-            custom_id: request.custom_id,
-            params: {
-              ...request.params,
-              model: distill_model,
-              max_tokens: distill_max_output_tokens,
-              service_tier: 'standard_only',
-              output_config: { effort: 'max' },
-              thinking: { type: 'adaptive' }
-            }
-          }
-        ]
-      })
-    }
+  const send_batch_response = await aisdk.messages.batches.create({
+    requests: [
+      {
+        custom_id: request.custom_id,
+        params: {
+          ...request.params,
+          model: distill_model,
+          max_tokens: distill_max_output_tokens,
+          service_tier: 'standard_only',
+          output_config: { effort: 'max' },
+          thinking: { type: 'adaptive' }
+        }
+      }
+    ]
+  });
+
+  await db.insert(outputBatchTable).values({
+    request_id: request.custom_id,
+    batch_id: send_batch_response.id,
+    status: send_batch_response.processing_status
+  });
+
+  console.log(
+    `Request ${request.custom_id}: batch request sent ${send_batch_response.id}`
   );
-  if (send_batch_fetch.ok) {
-    const send_batch_response =
-      (await send_batch_fetch.json()) as IBatchResponse;
-
-    await db.insert(outputBatchTable).values({
-      request_id: request.custom_id,
-      batch_id: send_batch_response.id,
-      status: send_batch_response.processing_status
-    });
-
-    console.log(
-      `Request ${request.custom_id}: batch request sent ${send_batch_response.id}`
-    );
-  } else {
-    console.log(
-      `Request ${request.custom_id}: failed to batch`,
-      await send_batch_fetch.json()
-    );
-  }
 }

@@ -1,3 +1,4 @@
+import type Anthropic from '@anthropic-ai/sdk';
 import { text, sqliteTable, index, blob } from 'drizzle-orm/sqlite-core';
 export const storeTable = sqliteTable(
   'store',
@@ -21,6 +22,6 @@ export const outputBatchTable = sqliteTable(
 export const datasetTable = sqliteTable('dataset', {
   batch_id: text().primaryKey(),
   messages: blob({ mode: 'json' }).$type<
-    Array<{ role: 'user' | 'assistant'; content: string }>
+    Array<Anthropic.Messages.MessageParam>
   >()
 });

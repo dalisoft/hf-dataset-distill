@@ -1,5 +1,6 @@
 import Bun from 'bun';
 import { countTokens } from '@anthropic-ai/tokenizer';
+import type Anthropic from '@anthropic-ai/sdk';
 
 const dataset_output_file = `dataset/claude-opus-4.6-high-reasoning-700x.jsonl`;
 
@@ -7,7 +8,9 @@ const { format } = Intl.NumberFormat('en-US');
 
 const file = Bun.file(dataset_output_file);
 const dataset = await file.text();
-const rows = Bun.JSONL.parse(dataset) as unknown as IMessages[];
+const rows = Bun.JSONL.parse(
+  dataset
+) as unknown as Anthropic.Messages.MessageCreateParamsNonStreaming[];
 
 const row_messages = rows.map((row) => row.messages);
 
