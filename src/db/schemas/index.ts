@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import type OpenAI from 'openai';
 import { text, sqliteTable, index, blob } from 'drizzle-orm/sqlite-core';
 export const storeTable = sqliteTable(
   'store',
@@ -14,7 +14,20 @@ export const outputBatchTable = sqliteTable(
   {
     request_id: text().primaryKey(),
     batch_id: text().unique().notNull(),
-    status: text({ enum: ['in_progress', 'ended', 'canceling'] }).notNull()
+    status: text({
+      enum: [
+        'in_progress',
+        'completed',
+        'cancelling',
+        'cancelled',
+        'validating',
+        'failed',
+        'finalizing',
+        'expired'
+      ]
+    })
+      .notNull()
+      .$type<OpenAI.Batches.Batch['status']>()
   },
   (table) => [index('output_batch_status_idx').on(table.status)]
 );
@@ -22,6 +35,9 @@ export const outputBatchTable = sqliteTable(
 export const datasetTable = sqliteTable('dataset', {
   batch_id: text().primaryKey(),
   messages: blob({ mode: 'json' }).$type<
-    Array<Anthropic.Messages.MessageParam>
+    Array<
+      | OpenAI.Responses.ResponseInputMessageItem
+      | OpenAI.Responses.ResponseOutputMessage
+    >
   >()
 });

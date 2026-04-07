@@ -1,6 +1,11 @@
 import { JSONL, SHA256, file, randomUUIDv7 } from 'bun';
 import { and, eq, not } from 'drizzle-orm';
+import assert from 'node:assert';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { unlink } from 'node:fs/promises';
+import os from 'node:os';
 import { setTimeout } from 'node:timers/promises';
+import OpenAI from 'openai';
 import 'tss-env/auto.js';
 import { db } from './db.ts';
 import {
@@ -8,21 +13,25 @@ import {
   outputBatchTable,
   storeTable
 } from './db/schemas/index.ts';
-import Anthropic from '@anthropic-ai/sdk';
 
 const dataset_input_file = `dataset/programming-language-source-2000x.jsonl`;
 const entries_limit = -1; // -1 for unlimited
 
-const aisdk = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
+const aisdk = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
 });
 
-const distill_model = 'claude-opus-4-6';
+const distill_model = 'gpt-5.4';
 const distill_max_output_tokens = 32000;
 
 const jsonl_data_source = JSONL.parse(
   await file(dataset_input_file).text()
-) as Array<{ messages: Anthropic.Messages.MessageParam[] }>;
+) as Array<{
+  messages: Array<
+    | OpenAI.Responses.ResponseInputMessageItem
+    | OpenAI.Responses.ResponseOutputMessage
+  >;
+}>;
 const jsonl_data =
   typeof entries_limit === 'number' &&
   !Number.isNaN(entries_limit) &&
@@ -32,12 +41,12 @@ const jsonl_data =
 
 // Input file parsing
 const input_messages = jsonl_data
-  .map((data) => data.messages.slice(0, 1))
+  .map((data) => data?.messages?.slice(0, 1) ?? [])
   .flat();
 
 // Prepare dataset for batch
 const messages_requests = input_messages.map((message) => ({
-  custom_id: SHA256.hash(message.content.toString(), 'hex').toString(),
+  custom_id: SHA256.hash(message.toString(), 'hex').toString(),
   params: {
     messages: [message]
   }
@@ -64,36 +73,50 @@ if (
 }
 
 // Prepare batch and output
-async function handleBatch(
-  result: Anthropic.Messages.Batches.MessageBatchIndividualResponse
-) {
-  switch (result.result.type) {
-    case 'succeeded':
+async function handleBatch(result: OpenAI.Batches.Batch) {
+  switch (result.status) {
+    case 'completed':
+      const content = await aisdk.files.content(result.input_file_id);
+      const data = await content.json();
+
       const user_messages =
-        messages_requests.find((req) => req.custom_id === result.custom_id)
+        messages_requests.find((req) => req.custom_id === data.custom_id)
           ?.params?.messages ?? [];
 
-      const messages: Anthropic.Messages.MessageParam[] = [
+      const messages: Array<
+        | OpenAI.Responses.ResponseInputMessageItem
+        | OpenAI.Responses.ResponseOutputMessage
+      > = [
         ...user_messages,
         {
-          role: 'assistant' as 'assistant',
-          content: result.result.message.content
-            .map((content) =>
-              content.type === 'text'
-                ? content.text
-                : content.type === 'thinking'
-                  ? `<${content.type}>${content.thinking}</${content.type}>`
+          role: 'assistant',
+          content: data.response.body.output
+            .map((content: OpenAI.Responses.ResponseOutputItem) =>
+              content.type === 'message'
+                ? content.content
+                    .map((c) => (c.type === 'output_text' ? c.text : ''))
+                    .filter(Boolean)
+                    .join('\n')
+                : content.type === 'reasoning'
+                  ? `<thinking>${
+                      content.content
+                        ?.map((c) =>
+                          c.type === 'reasoning_text' ? c.text : ''
+                        )
+                        .filter(Boolean)
+                        .join('\n') ?? ''
+                    }</thinking>`
                   : ''
             )
             .filter(Boolean)
-            .join('\n') as Anthropic.Messages.MessageParam['content']
-        }
+            .join('\n') as OpenAI.Responses.ResponseOutputText[]
+        } satisfies OpenAI.Responses.ResponseOutputMessage
       ].filter(Boolean);
 
       await db
         .insert(datasetTable)
         .values({
-          batch_id: result.result.message.id,
+          batch_id: result.id,
           messages
         })
         .onConflictDoNothing();
@@ -107,37 +130,31 @@ async function handleBatch(
           }
         ); */
       break;
-    case 'canceled':
-      console.log(`Request ${result.custom_id}: batch request canceled`);
+    case 'cancelled':
+      console.log(`Request ${data.custom_id}: batch request canceled`);
 
       await db
         .delete(outputBatchTable)
-        .where(eq(outputBatchTable.request_id, result.custom_id));
+        .where(eq(outputBatchTable.request_id, data.custom_id));
 
       break;
-    case 'errored':
-      if (result.result.error.error.type === 'invalid_request_error') {
-        // Request body must be fixed before re-sending request
-        console.log(`Validation error: ${result.custom_id}`);
-      } else {
-        // Request can be retried directly
-        console.log(`Server error: ${result.custom_id}`);
-      }
+    case 'failed':
+      console.log(`Server error: ${data.custom_id}`);
       break;
     case 'expired':
-      console.log(`Request ${result.custom_id}: batch request expired`);
+      console.log(`Request ${data.custom_id}: batch request expired`);
 
       await db
         .delete(outputBatchTable)
-        .where(eq(outputBatchTable.request_id, result.custom_id));
+        .where(eq(outputBatchTable.request_id, data.custom_id));
       break;
   }
 }
 
 async function retrieveBatches(lastId: string | null) {
-  const batches = await aisdk.messages.batches.list({
+  const batches = await aisdk.batches.list({
     limit: 500,
-    ...(lastId !== null ? { after_id: lastId } : {})
+    ...(lastId !== null ? { after: lastId } : {})
   });
   const response = batches;
 
@@ -145,7 +162,10 @@ async function retrieveBatches(lastId: string | null) {
     console.log('Response failed', response);
     return;
   }
-  const { data: batches_response, has_more, last_id } = response;
+  const { data: batches_response, has_more } = response;
+  // @ts-expect-error It should work
+  const last_id = response.nextPageRequestOptions()?.query?.id;
+  assert.ok(last_id, 'Next query ID should be valid');
 
   await Promise.all(
     batches_response.map(async (request) => {
@@ -161,18 +181,15 @@ async function retrieveBatches(lastId: string | null) {
           .where(
             and(
               eq(outputBatchTable.batch_id, request.id),
-              eq(outputBatchTable.status, 'ended')
+              eq(outputBatchTable.status, 'completed')
             )
           )
           .get()
       ) {
         // console.log('Batch entry end', request.id);
 
-        for await (const batch_item of await aisdk.messages.batches.results(
-          request.id
-        )) {
-          await handleBatch(batch_item);
-        }
+        const batch_item = await aisdk.batches.retrieve(request.id);
+        await handleBatch(batch_item);
 
         return;
       }
@@ -184,26 +201,20 @@ async function retrieveBatches(lastId: string | null) {
           .where(
             and(
               eq(outputBatchTable.batch_id, request.id),
-              not(eq(outputBatchTable.status, request.processing_status))
+              not(eq(outputBatchTable.status, request.status))
             )
           )
           .get()
       ) {
         await db
           .update(outputBatchTable)
-          .set({ status: request.processing_status })
+          .set({ status: request.status })
           .where(eq(outputBatchTable.batch_id, request.id));
       }
 
-      if (
-        request.processing_status === 'ended' &&
-        request.request_counts.succeeded
-      ) {
-        for await (const result of await aisdk.messages.batches.results(
-          request.id
-        )) {
-          await handleBatch(result);
-        }
+      if (request.status === 'completed' && request.request_counts?.completed) {
+        const result = await aisdk.batches.retrieve(request.id);
+        await handleBatch(result);
       }
     })
   );
@@ -228,26 +239,43 @@ for (const request of messages_requests) {
     continue;
   }
 
-  const send_batch_response = await aisdk.messages.batches.create({
-    requests: [
-      {
-        custom_id: request.custom_id,
-        params: {
-          ...request.params,
-          model: distill_model,
-          max_tokens: distill_max_output_tokens,
-          service_tier: 'standard_only',
-          output_config: { effort: 'max' },
-          thinking: { type: 'adaptive' }
+  const tmpfile = `${os.tmpdir()}/${request.custom_id}.jsonl`;
+  const file = createWriteStream(tmpfile);
+
+  file.write(
+    JSON.stringify({
+      custom_id: request.custom_id,
+      method: 'POST',
+      url: '/v1/responses',
+      body: {
+        model: distill_model,
+        input: request.params.messages,
+        max_tokens: distill_max_output_tokens,
+        reasoning: {
+          effort: 'xhigh',
+          summary: 'auto'
         }
-      }
-    ]
+      } as OpenAI.Responses.ResponseCreateParamsNonStreaming
+    })
+  );
+
+  const upload_file = await aisdk.files.create({
+    file: createReadStream(tmpfile),
+    purpose: 'batch'
   });
+  const send_batch_response = await aisdk.batches.create({
+    input_file_id: upload_file.id,
+    endpoint: '/v1/chat/completions',
+    completion_window: '24h'
+  });
+
+  // Clean tmp file
+  await unlink(tmpfile);
 
   await db.insert(outputBatchTable).values({
     request_id: request.custom_id,
     batch_id: send_batch_response.id,
-    status: send_batch_response.processing_status
+    status: send_batch_response.status
   });
 
   console.log(

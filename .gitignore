@@ -146,6 +146,7 @@ vite.config.ts.timestamp-*
 # Output files
 artifacts
 app.db
+*.bak
 
 # types
 types/env.d.ts
