@@ -41,12 +41,12 @@ const jsonl_data =
 
 // Input file parsing
 const input_messages = jsonl_data
-  .map((data) => data?.messages?.slice(0, 1) ?? [])
+  .map((data) => data.messages.slice(0, 1))
   .flat();
 
 // Prepare dataset for batch
 const messages_requests = input_messages.map((message) => ({
-  custom_id: SHA256.hash(message.toString(), 'hex').toString(),
+  custom_id: SHA256.hash(message.content.toString(), 'hex').toString(),
   params: {
     messages: [message]
   }
@@ -99,9 +99,9 @@ async function handleBatch(
                     .join('\n')
                 : content.type === 'reasoning'
                   ? `<thinking>${
-                      content.content
-                        ?.map((c) =>
-                          c.type === 'reasoning_text' ? c.text : ''
+                      content.summary
+                        ?.map(
+                          (c, i) => `<summary index="${i}">${c.text}</summary>`
                         )
                         .filter(Boolean)
                         .join('\n') ?? ''
@@ -161,6 +161,8 @@ async function retrieveBatches(page = 0) {
 
   await Promise.all(
     batches.map(async (request) => {
+      const result = await aisdk.responses.retrieve(request.batch_id);
+
       if (
         db
           .select()
@@ -169,10 +171,7 @@ async function retrieveBatches(page = 0) {
           .get() ||
         request.status === 'completed'
       ) {
-        // console.log('Batch entry end', request.id);
-
-        const batch_item = await aisdk.responses.retrieve(request.request_id);
-        await handleBatch(batch_item, request);
+        await handleBatch(result, request);
 
         return;
       }
@@ -184,18 +183,17 @@ async function retrieveBatches(page = 0) {
           .where(
             and(
               eq(outputBatchTable.batch_id, request.batch_id),
-              not(eq(outputBatchTable.status, request.status))
+              not(eq(outputBatchTable.status, result.status ?? 'queued'))
             )
           )
           .get()
       ) {
         await db
           .update(outputBatchTable)
-          .set({ status: request.status })
+          .set({ status: result.status })
           .where(eq(outputBatchTable.batch_id, request.batch_id));
       }
 
-      const result = await aisdk.responses.retrieve(request.batch_id);
       await handleBatch(result, request);
     })
   );
