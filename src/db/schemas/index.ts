@@ -27,7 +27,7 @@ export const outputBatchTable = sqliteTable(
       ]
     })
       .notNull()
-      .$type<OpenAI.Batches.Batch['status']>()
+      .$type<OpenAI.Responses.ResponseStatus>()
   },
   (table) => [index('output_batch_status_idx').on(table.status)]
 );
@@ -37,7 +37,7 @@ export const datasetTable = sqliteTable('dataset', {
   messages: blob({ mode: 'json' }).$type<
     Array<
       | OpenAI.Responses.ResponseInputMessageItem
-      | OpenAI.Responses.ResponseOutputMessage
+      | Partial<OpenAI.Responses.ResponseOutputMessage>
     >
   >()
 });

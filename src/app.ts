@@ -15,7 +15,7 @@ import {
 } from './db/schemas/index.ts';
 
 const dataset_input_file = `dataset/programming-language-source-2000x.jsonl`;
-const entries_limit = -1; // -1 for unlimited
+const entries_limit = 10; // -1 for unlimited
 
 const aisdk = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -73,25 +73,25 @@ if (
 }
 
 // Prepare batch and output
-async function handleBatch(result: OpenAI.Batches.Batch) {
+async function handleBatch(
+  result: OpenAI.Responses.Response,
+  request: typeof outputBatchTable.$inferSelect
+) {
   switch (result.status) {
     case 'completed':
-      const content = await aisdk.files.content(result.input_file_id);
-      const data = await content.json();
-
       const user_messages =
-        messages_requests.find((req) => req.custom_id === data.custom_id)
+        messages_requests.find((req) => req.custom_id === request.request_id)
           ?.params?.messages ?? [];
 
       const messages: Array<
         | OpenAI.Responses.ResponseInputMessageItem
-        | OpenAI.Responses.ResponseOutputMessage
+        | Partial<OpenAI.Responses.ResponseOutputMessage>
       > = [
         ...user_messages,
         {
           role: 'assistant',
-          content: data.response.body.output
-            .map((content: OpenAI.Responses.ResponseOutputItem) =>
+          content: result.output
+            .map((content) =>
               content.type === 'message'
                 ? content.content
                     .map((c) => (c.type === 'output_text' ? c.text : ''))
@@ -109,8 +109,8 @@ async function handleBatch(result: OpenAI.Batches.Batch) {
                   : ''
             )
             .filter(Boolean)
-            .join('\n') as OpenAI.Responses.ResponseOutputText[]
-        } satisfies OpenAI.Responses.ResponseOutputMessage
+            .join('\n') as unknown as OpenAI.Responses.ResponseOutputText[]
+        } satisfies Partial<OpenAI.Responses.ResponseOutputMessage>
       ].filter(Boolean);
 
       await db
@@ -131,65 +131,48 @@ async function handleBatch(result: OpenAI.Batches.Batch) {
         ); */
       break;
     case 'cancelled':
-      console.log(`Request ${data.custom_id}: batch request canceled`);
+      console.log(`Request ${request.request_id}: batch request canceled`);
 
       await db
         .delete(outputBatchTable)
-        .where(eq(outputBatchTable.request_id, data.custom_id));
+        .where(eq(outputBatchTable.request_id, request.request_id));
 
       break;
     case 'failed':
-      console.log(`Server error: ${data.custom_id}`);
+      console.log(`Server error: ${request.request_id}`, result.error?.message);
       break;
-    case 'expired':
-      console.log(`Request ${data.custom_id}: batch request expired`);
+    case 'incomplete':
+      console.log(`Request ${request.request_id}: batch request expired`);
 
       await db
         .delete(outputBatchTable)
-        .where(eq(outputBatchTable.request_id, data.custom_id));
+        .where(eq(outputBatchTable.request_id, request.request_id));
       break;
   }
 }
 
-async function retrieveBatches(lastId: string | null) {
-  const batches = await aisdk.batches.list({
-    limit: 500,
-    ...(lastId !== null ? { after: lastId } : {})
-  });
-  const response = batches;
-
-  if (!response.data) {
-    console.log('Response failed', response);
-    return;
-  }
-  const { data: batches_response, has_more } = response;
-  // @ts-expect-error It should work
-  const last_id = response.nextPageRequestOptions()?.query?.id;
-  assert.ok(last_id, 'Next query ID should be valid');
+async function retrieveBatches(page = 0) {
+  const batches = db
+    .select()
+    .from(outputBatchTable)
+    .limit(100)
+    .offset(page * 100)
+    .all();
 
   await Promise.all(
-    batches_response.map(async (request) => {
+    batches.map(async (request) => {
       if (
         db
           .select()
           .from(datasetTable)
-          .where(and(eq(datasetTable.batch_id, request.id)))
+          .where(and(eq(datasetTable.batch_id, request.batch_id)))
           .get() ||
-        db
-          .select()
-          .from(outputBatchTable)
-          .where(
-            and(
-              eq(outputBatchTable.batch_id, request.id),
-              eq(outputBatchTable.status, 'completed')
-            )
-          )
-          .get()
+        request.status === 'completed'
       ) {
         // console.log('Batch entry end', request.id);
 
-        const batch_item = await aisdk.batches.retrieve(request.id);
-        await handleBatch(batch_item);
+        const batch_item = await aisdk.responses.retrieve(request.request_id);
+        await handleBatch(batch_item, request);
 
         return;
       }
@@ -200,7 +183,7 @@ async function retrieveBatches(lastId: string | null) {
           .from(outputBatchTable)
           .where(
             and(
-              eq(outputBatchTable.batch_id, request.id),
+              eq(outputBatchTable.batch_id, request.batch_id),
               not(eq(outputBatchTable.status, request.status))
             )
           )
@@ -209,23 +192,20 @@ async function retrieveBatches(lastId: string | null) {
         await db
           .update(outputBatchTable)
           .set({ status: request.status })
-          .where(eq(outputBatchTable.batch_id, request.id));
+          .where(eq(outputBatchTable.batch_id, request.batch_id));
       }
 
-      if (request.status === 'completed' && request.request_counts?.completed) {
-        const result = await aisdk.batches.retrieve(request.id);
-        await handleBatch(result);
-      }
+      const result = await aisdk.responses.retrieve(request.batch_id);
+      await handleBatch(result, request);
     })
   );
 
-  if (has_more) {
-    console.log('Has more items, paging to next page', { has_more, last_id });
+  if ((await db.$count(outputBatchTable)) > 100) {
     await setTimeout(1000 * 30);
-    await retrieveBatches(last_id);
+    await retrieveBatches(page + 1);
   }
 }
-await retrieveBatches(null);
+await retrieveBatches(0);
 
 // Initialize batch
 for (const request of messages_requests) {
@@ -239,46 +219,25 @@ for (const request of messages_requests) {
     continue;
   }
 
-  const tmpfile = `${os.tmpdir()}/${request.custom_id}.jsonl`;
-  const file = createWriteStream(tmpfile);
-
-  file.write(
-    JSON.stringify({
-      custom_id: request.custom_id,
-      method: 'POST',
-      url: '/v1/responses',
-      body: {
-        model: distill_model,
-        input: request.params.messages,
-        max_tokens: distill_max_output_tokens,
-        reasoning: {
-          effort: 'xhigh',
-          summary: 'auto'
-        }
-      } as OpenAI.Responses.ResponseCreateParamsNonStreaming
-    })
-  );
-
-  const upload_file = await aisdk.files.create({
-    file: createReadStream(tmpfile),
-    purpose: 'batch'
+  const send_flex_response = await aisdk.responses.create({
+    model: distill_model,
+    input: request.params.messages,
+    max_output_tokens: distill_max_output_tokens,
+    reasoning: {
+      effort: 'xhigh',
+      summary: 'auto'
+    },
+    service_tier: 'flex',
+    background: true
   });
-  const send_batch_response = await aisdk.batches.create({
-    input_file_id: upload_file.id,
-    endpoint: '/v1/chat/completions',
-    completion_window: '24h'
-  });
-
-  // Clean tmp file
-  await unlink(tmpfile);
 
   await db.insert(outputBatchTable).values({
     request_id: request.custom_id,
-    batch_id: send_batch_response.id,
-    status: send_batch_response.status
+    batch_id: send_flex_response.id,
+    status: send_flex_response.status ?? 'queued'
   });
 
   console.log(
-    `Request ${request.custom_id}: batch request sent ${send_batch_response.id}`
+    `Request ${request.custom_id}: flex request sent ${send_flex_response.id}`
   );
 }
