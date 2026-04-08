@@ -1,9 +1,5 @@
 import { JSONL, SHA256, file, randomUUIDv7 } from 'bun';
 import { and, eq, not } from 'drizzle-orm';
-import assert from 'node:assert';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { unlink } from 'node:fs/promises';
-import os from 'node:os';
 import { setTimeout } from 'node:timers/promises';
 import OpenAI from 'openai';
 import 'tss-env/auto.js';
@@ -15,7 +11,7 @@ import {
 } from './db/schemas/index.ts';
 
 const dataset_input_file = `dataset/programming-language-source-2000x.jsonl`;
-const entries_limit = 10; // -1 for unlimited
+const entries_limit = 100; // -1 for unlimited
 
 const aisdk = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -140,6 +136,10 @@ async function handleBatch(
       break;
     case 'failed':
       console.log(`Server error: ${request.request_id}`, result.error?.message);
+
+      await db
+        .delete(outputBatchTable)
+        .where(eq(outputBatchTable.request_id, request.request_id));
       break;
     case 'incomplete':
       console.log(`Request ${request.request_id}: batch request expired`);
