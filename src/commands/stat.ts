@@ -1,8 +1,8 @@
 import Bun from 'bun';
-import { countTokens } from '@anthropic-ai/tokenizer';
-import type Anthropic from '@anthropic-ai/sdk';
+import { encoding_for_model } from 'tiktoken';
+import type OpenAI from 'openai';
 
-const dataset_output_file = `dataset/claude-opus-4.6-high-reasoning-700x.jsonl`;
+const dataset_output_file = `dataset/gpt-5.4-xhigh-reasoning-700x.jsonl`;
 
 const { format } = Intl.NumberFormat('en-US');
 
@@ -10,7 +10,7 @@ const file = Bun.file(dataset_output_file);
 const dataset = await file.text();
 const rows = Bun.JSONL.parse(
   dataset
-) as unknown as Anthropic.Messages.MessageCreateParamsNonStreaming[];
+) as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming[];
 
 const row_messages = rows.map((row) => row.messages);
 
@@ -29,11 +29,15 @@ const output = row_messages
   )
   .join('');
 
-const input_tokens = countTokens(input);
-const output_tokens = countTokens(output);
+const tokenizer = encoding_for_model('gpt-5');
+
+const input_tokens = tokenizer.encode(input).length;
+const output_tokens = tokenizer.encode(output).length;
 const total_tokens = input_tokens + output_tokens;
 
 console.log(`Total tokens: ${format(total_tokens)}`);
 
 console.log(`Input tokens: ${format(input_tokens)}`);
 console.log(`Output tokens: ${format(output_tokens)}`);
+
+tokenizer.free();
