@@ -121,7 +121,7 @@ async function handleBatch(
 
       break;
     case 'cancelled':
-      console.log(`Request ${request.request_id}: batch request canceled`);
+      console.log(`Request ${request.request_id}: flex request canceled`);
 
       await db
         .delete(outputBatchTable)
@@ -137,11 +137,16 @@ async function handleBatch(
 
       break;
     case 'incomplete':
-      console.log(`Request ${request.request_id}: batch request expired`);
+      console.log(`Request ${request.request_id}: flex request incomplete`);
 
       await db
         .delete(outputBatchTable)
         .where(eq(outputBatchTable.request_id, request.request_id));
+
+      break;
+    case 'in_progress':
+    case 'queued':
+      // Just wait here
 
       break;
   }
