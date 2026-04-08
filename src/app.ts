@@ -199,7 +199,8 @@ async function retrieveBatches(page = 0) {
     await retrieveBatches(page + 1);
   }
 }
-await retrieveBatches(0);
+// Background tasks, no block here
+retrieveBatches(0);
 
 // Initialize batch
 for (const request of messages_requests) {
