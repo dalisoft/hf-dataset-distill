@@ -28,7 +28,7 @@
     "typescript": "^6.0.2"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.80.0",
+    "@anthropic-ai/sdk": "^0.85.0",
     "@anthropic-ai/tokenizer": "^0.0.4",
     "drizzle-orm": "^0.45.2",
     "tss-env": "^0.0.3"
