@@ -2,8 +2,8 @@
 
 An project to help with distillation of models to get dataset with Batch API (50% discount)
 
-- [GitHub](https://github.com/dalisoft/hf-dataset-distill)
-- [HuggingFace](https://huggingface.co/datasets/dalisoft/claude-opus-4.6-high-reasoning-700x)
+- GitHub: [Claude Opus 4.6](https://github.com/dalisoft/hf-dataset-distill/tree/main) &bullet; [GPT-5.4](https://github.com/dalisoft/hf-dataset-distill/tree/openai)
+- HuggingFace: [Claude Opus 4.6](https://huggingface.co/datasets/dalisoft/claude-opus-4.6-high-reasoning-700x) &bullet; [GPT-5.4](https://huggingface.co/datasets/dalisoft/gpt-5.4-xhigh-reasoning-550x)
 
 ## Features
 
