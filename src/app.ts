@@ -117,14 +117,6 @@ async function handleBatch(
         })
         .onConflictDoNothing();
 
-      // Delete batch, CLEANUP
-      /* await fetch(
-          `https://api.anthropic.com/v1/messages/batches/${request.id}`,
-          {
-            method: 'DELETE',
-            headers: anthropic_headers
-          }
-        ); */
       break;
     case 'cancelled':
       console.log(`Request ${request.request_id}: batch request canceled`);
@@ -140,6 +132,7 @@ async function handleBatch(
       await db
         .delete(outputBatchTable)
         .where(eq(outputBatchTable.request_id, request.request_id));
+
       break;
     case 'incomplete':
       console.log(`Request ${request.request_id}: batch request expired`);
@@ -147,6 +140,7 @@ async function handleBatch(
       await db
         .delete(outputBatchTable)
         .where(eq(outputBatchTable.request_id, request.request_id));
+
       break;
   }
 }
