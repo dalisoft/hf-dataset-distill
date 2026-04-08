@@ -2,7 +2,7 @@ import Bun from 'bun';
 import { encoding_for_model } from 'tiktoken';
 import type OpenAI from 'openai';
 
-const dataset_output_file = `dataset/gpt-5.4-xhigh-reasoning-700x.jsonl`;
+const dataset_output_file = `dataset/gpt-5.4-xhigh-reasoning-550x.jsonl`;
 
 const { format } = Intl.NumberFormat('en-US');
 

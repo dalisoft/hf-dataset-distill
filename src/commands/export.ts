@@ -1,7 +1,7 @@
 import { db } from '../db.ts';
 import { datasetTable } from '../db/schemas/index.ts';
 
-const dataset_output_file = `dataset/gpt-5.4-xhigh-reasoning-700x.jsonl`;
+const dataset_output_file = `dataset/gpt-5.4-xhigh-reasoning-550x.jsonl`;
 
 const results = db
   .select({ messages: datasetTable.messages })
