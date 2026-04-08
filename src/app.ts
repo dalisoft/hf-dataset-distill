@@ -11,7 +11,7 @@ import {
 } from './db/schemas/index.ts';
 
 const dataset_input_file = `dataset/programming-language-source-2000x.jsonl`;
-const entries_limit = 100; // -1 for unlimited
+const entries_limit = 1000; // -1 for unlimited
 
 const aisdk = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -192,7 +192,7 @@ async function retrieveBatches(page = 0) {
     })
   );
 
-  if ((await db.$count(outputBatchTable)) > 100) {
+  if ((await db.$count(outputBatchTable)) > (page + 1) * 100) {
     await setTimeout(1000 * 30);
     await retrieveBatches(page + 1);
   }
