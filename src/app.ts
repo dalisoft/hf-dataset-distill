@@ -15,8 +15,8 @@ const entries_limit = -1; // -1 for unlimited
 
 const aisdk = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  timeout: 30 * 1000 * 60 /* 30 minutes */,
-  maxRetries: 3
+  timeout: 60 * 1000 * 60 /* 60 minutes or 1-hr */,
+  maxRetries: 5
 });
 
 const distill_model = 'gpt-5.4';
