@@ -11,7 +11,7 @@ import {
 } from './db/schemas/index.ts';
 
 const dataset_input_file = `dataset/programming-language-source-2000x.jsonl`;
-const entries_limit = 1000; // -1 for unlimited
+const entries_limit = -1; // -1 for unlimited
 
 const aisdk = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
